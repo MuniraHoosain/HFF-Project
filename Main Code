@@ -1,0 +1,383 @@
+
+from astropy.io import ascii
+from cosmocalc import cosmocalc
+import os
+from astropy.io import fits
+from astropy.wcs import WCS
+from matplotlib.patches import Circle
+from astropy import units as u
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy as sp
+from scipy.stats import norm
+import scipy.optimize as optimize
+
+
+cos = np.cos
+sin = np.sin
+pi = np.pi
+rad = np.radians
+
+##Reading in the catalogues
+
+cat = ascii.read('')
+zout = fits.open('')
+
+zcat = zout[1].data
+
+datadir = ''
+imfile = datadir+
+hdu = fits.open(imfile)[0]
+wcs = WCS(hdu.header)
+
+
+#opening up output files
+
+output = open('catalogue_new.txt','w')
+output2 = open('pairs_new.txt','w')
+output3 = open('','w')
+output4 = open('','w')
+
+
+
+##reading out redshift data
+
+zspec = zcat['z_spec']
+zphot = zcat['z_phot']
+
+
+RA = cat['ra']
+DEC = cat['dec']
+
+#assigning the best redshift (note: this didn't work so well last time but hopefully it will work this time)
+
+zbest = np.copy(zspec)
+mask = (zbest == -1.)
+zbest[mask] = zphot[mask]
+
+
+## Comparing spectroscopic and photometric redshifts for the statistics and sample selection
+#these are only the galaxies where we have both spec and phot values
+sample = (zspec >= 0) & (zphot != -1) & (zspec < 1) & (zphot <1) & (zphot != -1) 
+
+plt.plot(zspec[sample],zphot[sample],'bo')
+
+##ID/Source
+
+identity = zcat['id']
+zsource = cat['REFspecz'] 
+
+
+
+## calculating the scatter of the photometric reshifts using the NMAD
+#this is fitting the nmad so it is not affected by only using those values
+
+dz = (zphot[sample] - zspec[sample])/(1 + zspec[sample])
+med = np.median(dz)
+scatter = 1.4826*np.median(np.abs(dz-med))
+scatterprint = round(scatter,3)
+print('sigmaNMAD =', scatterprint)
+
+xvalues = np.linspace(0,1,len(zspec[sample]))
+y = xvalues
+
+
+plt.plot(xvalues,y,'g-')
+plt.xlabel('spectroscopic redshift')
+plt.ylabel('photometric redshift')
+plt.title('zspec vs zphot for z < 1')
+plt.text(0.2, 0.8, '$\sigma_{NMAD}$ =' + str(scatterprint))
+plt.show() # if this plot is a perfect straight line, then catalogues aren't being read in correctly
+
+
+##Calculating Spectroscopic Redshift Bounds
+
+
+
+lowbound = 0.48 ##Lower limit from paper
+upbound = 0.62 ##upper limit from paper
+
+
+clusterlow = 0.52 ## new limits for a better gauss fit - no. bins = 12
+clusterhigh = 0.56
+
+#choose which boundaries to use for gauss fit
+
+cboundlow = clusterlow 
+cboundup = clusterhigh
+
+
+specselec = (zspec > cboundlow) & (zspec < cboundup) & (zphot != -1)
+zspecsample = zspec[specselec]
+
+plt.hist(zspecsample, bins = 12, normed =True)
+
+
+##NOTE: NEED TO CLEAN UP THIS HISTOGRAM AND SORT OUT THE PROBLEMS ASSOCIATED WITH IT - REFIT GAUSS EXC GROUP
+
+
+mu,std = norm.fit(zspecsample)
+x = np.linspace(cboundlow,cboundup,len(zspecsample))
+p = norm.pdf(x,mu,std)
+muprint = round(mu,3)
+stdprint = round(std,3)
+plt.plot(x,p)
+plt.title('spectroscopic redshifts 0.48 < x < 0.62 - normal distribution')
+plt.text(0.49,31, '$\sigma$ =' +str(stdprint)) 
+plt.text(0.49,29, 'mean =' +str(muprint)) 
+plt.xlabel('spectroscopic redshift')
+plt.show()
+print('sigma =', stdprint, 'mean', muprint)
+
+
+
+##making a 3sigma cut for spectroscopy
+
+clusterzspec = mu
+zminspec = clusterzspec - 3*std
+zmaxspec = clusterzspec + 3*std
+
+
+##making a 3sigma cut for photometry
+
+clusterzphot = 0.545
+zminphot = clusterzphot - 3*scatter
+zmaxphot = clusterzphot + 3*scatter
+
+
+## Other parameters
+
+## rest-frame magnitudes calculated by eazy
+restU = zcat['restU']
+restV = zcat['restV']
+restJ = zcat['restJ']
+
+SFR = zcat['SFR']
+##SFR
+
+UminV = -2.5*np.log10(restU/restV)
+VminJ = -2.5*np.log10(restV/restJ)
+
+
+## mass calculated by eazy
+meazy = zcat['mass']
+masses = meazy
+logmass = np.log10(masses)
+
+### magnitude in H-band (F160W)
+
+
+hmag = -2.5*np.log10(cat['f_F160W'])+25
+hmag[cat['f_F160W'] == -99] = -99 ## set to -99 if no flux measurement
+	
+### z-band magnitude
+zmag = -2.5*np.log10(cat['f_F814W'])+25
+zmag[cat['f_F814W'] == -99] = -99 ## set to -99 if no flux measurement
+
+
+#chosen parameters
+
+c = 3*10**5 ## km/s
+
+minmass = 10**9
+zmagmin = 26
+mindistance = 15 #kpc
+vmin = 1500 #km/s
+
+
+#plate scale
+
+z=0.545
+h=0.7  #use H0 = 70km/s/Mpc for everything
+ps = cosmocalc(clusterzphot,H0=70,WM=0.3,WV=0.7)['PS_kpc']
+r = 100/h /ps  #100/h kpc in arcseconds
+print ('search radius in arcsec: %f' %(r))
+
+
+
+##Selections
+
+
+sel = (((zphot > zminphot) & (zphot < zmaxphot) & (zspec == -1)) |( (zspec > zminspec) & (zspec < zmaxspec) )) & (masses > minmass) & (zmag < zmagmin)
+
+selphot = (zphot > zminphot) & (zphot < zmaxphot)  & (masses > minmass) & (zmag < zmagmin)
+sel2 = ( (zspec > zminspec) & (zspec < zmaxspec) )& (masses > minmass) & (zmag < zmagmin)
+
+
+bestzsel = (zbest > zminphot) & (zbest < zmaxphot)  & (masses > minmass) & (zmag < zmagmin) 
+bestzsample = zbest[bestzsel]
+plt.hist(bestzsample)
+plt.title('best z sample')
+plt.show()
+
+
+sel = bestzsel
+
+ra_sample = RA[sel] #convert to arcseconds
+dec_sample = DEC[sel]
+sample_id = identity[sel]
+mass_sample = masses[sel]
+source_spec = zsource[sel]
+
+
+N = len(ra_sample)
+
+
+
+z_sample_phot = zphot[selphot]  #note: photometric sample only
+z_sample_spec = zspec[sel2]
+z_sel = zspec[sel]
+
+plt.hist(z_sample_phot, color = 'g', label = 'photometric', bins = 17, normed = True)
+plt.hist(z_sample_spec, color = 'b', label = 'spectroscopic', bins = 13, normed = True)
+plt.title('redshifts of selected sample')
+plt.xlabel('redshift')
+plt.axvline(x = zminspec)
+plt.axvline(x= zmaxspec)
+plt.legend(loc = 2)
+plt.show()
+
+#distance calculation
+
+def distance_calc(dec1,dec2,ra1,ra2):
+	x = sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra1 - ra2)
+	theta = np.arccos(x)
+	distance = theta*3600*ps
+	return distance
+
+
+pair1 = []
+pair2 = []
+distancelist = []
+
+#pairfinding initial
+
+for i in range(N):
+	ra1 = ra_sample[i]
+	dec1 = dec_sample[i]
+	for j in range(N):
+		j > i
+		ra2 = ra_sample[j]
+		dec2 = dec_sample[j]
+		distance_found = distance_calc(dec1,dec2,ra1,ra2)
+		if (distance_found < mindistance) & (i != j):
+			pair1.append(i)
+			pair2.append(j)
+			distancelist.append(distance_found)
+ 
+#pairsize = len(distancelist)/3
+distancelist = np.array(distancelist)
+#distancepairs = np.split(distancelist,pairsize)
+#distancepairs = np.array(distancepairs)
+pair1 = np.array(pair1)
+pair2 = np.array(pair2)
+
+##VELOCITY CALCULATIONS
+
+def vpec_calc(z1,z2):
+	vpec = np.abs((c * (z1 - z2) ) / (1 + z1) )
+	return vpec
+
+
+pairvelocities = []
+vpecindices = []
+M = len(pair1)
+
+
+for k in range(M):
+	z1 = bestzsample[pair1[k]]
+	z2 = bestzsample[pair2[k]]
+	vpec = vpec_calc(z1,z2)
+	if vpec < vmin:
+		vpecindices.append(k)
+		pairvelocities.append(vpec)
+
+vpecindices = np.array(vpecindices)
+		
+## MASS SELECTIONS
+
+vdpair1 = pair1[vpecindices]
+vdpair2 = pair2[vpecindices]
+mass_selection = masses[bestzsel]
+pair_masses_1 = mass_selection[vdpair1]
+pair_masses_2 = mass_selection[vdpair2]
+
+
+mass_ratio = pair_masses_1/pair_masses_2
+
+invert = pair_masses_2/pair_masses_1
+massratio = np.copy(mass_ratio)
+mass_mask = (mass_ratio > 1.)
+
+massratio[mass_mask] = invert[mass_mask]
+
+plt.hist(massratio)
+plt.show()
+
+
+## SFR
+
+UminV_sample = UminV[sel]
+VminJ_sample = VminJ[sel]
+
+y1 = 1.3
+x1 = (y1 - 0.59)/0.88
+x2  = 1.6
+y2 = 0.88*x2 + 0.59
+
+xval = np.array([x1,x2])
+yval = np.array([y1,y2])
+
+sfrx = np.linspace(-1.1,3,100)
+sfry = 0.88*sfrx + 0.59
+
+
+quies = ((UminV_sample > 0.89*VminJ_sample + 0.59) & (VminJ_sample > x1) & (VminJ_sample < 1.6)) | ((UminV_sample > 1.3) & (VminJ_sample < x1))
+
+VminJp1 = VminJ_sample[vdpair1]
+VminJp2 = VminJ_sample[vdpair2]
+
+UminVp1 = UminV_sample[vdpair1]
+UminVp2 = UminV_sample[vdpair2]
+
+
+VminJQ = VminJ_sample[quies]
+UminVQ = UminV_sample[quies] 
+#sfr_sample = SFR[sel]
+
+plt.plot(sfrx,sfry)
+plt.scatter(VminJ_sample,UminV_sample, c ='b',alpha = 0.5, label = 'star forming')
+plt.scatter(VminJQ, UminVQ, c ='r', alpha = 0.5, label = 'quiescent')
+plt.scatter(VminJp1,UminVp1, c = 'k')
+plt.scatter(VminJp2,UminVp2, c = 'k')
+plt.show()
+
+
+
+
+## Plotting the main figure
+
+
+ra_m = ra_sample
+dec_m = dec_sample
+ra_primary = ra_sample[vdpair1]
+ra_secondary = ra_sample[vdpair2]
+dec_primary = dec_sample[vdpair1]
+dec_secondary = dec_sample[vdpair2]
+
+
+plt.figure(1)
+ax = plt.subplot(1,1,1, projection=wcs)
+ax.imshow(hdu.data, vmin=-1e-2, vmax=5.e-2, origin='lower',cmap='gray_r')
+ax.scatter(ra_m,dec_m, marker='+',transform=ax.get_transform('fk5'), c='g', label = 'cluster member')
+ax.scatter(ra_primary,dec_primary, s = 30, marker = 'o', transform = ax.get_transform('fk5'), c = 'r')
+ax.scatter(ra_secondary,dec_secondary,s=30, marker = 'o', transform = ax.get_transform('fk5'),c = 'b')
+
+plt.show()
+
+
+#########################################################################################################
+############################-----everything above this line works well-----##############################
+#########################################################################################################
+
+
