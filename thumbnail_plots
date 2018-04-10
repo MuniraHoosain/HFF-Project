@@ -1,0 +1,92 @@
+##Plotting thumbnail images of the galaxy pairs based on their XY positions using AstroPy
+
+
+from astropy.io import ascii
+import os
+from astropy.io import fits
+from astropy.wcs import WCS
+import numpy as np
+import matplotlib.pyplot as plt
+import astropy.visualization as viz
+
+datadir = ''                                        ##location of your image/fits file
+imfile = datadir+'f814w_drz.fits.gz'                ##your image file
+
+
+hdu = fits.open(imfile)[0]
+wcs = WCS(hdu.header)
+
+pairfile = ascii.read('.txt')                       ##ascii/txt file containing your galaxy information and XY coordinates
+
+IDP = pairfile.columns['IDP']
+SOURCEP = pairfile.columns['SOURCEP']
+RAP = pairfile.columns['RAP']
+DECP = pairfile.columns['DECP']
+IDS = pairfile.columns['IDS']
+RAS = pairfile.columns['RAS']
+DECS = pairfile.columns['DECS']
+X1 = pairfile.columns['X1']
+Y1 = pairfile.columns['Y1']
+X2 = pairfile.columns['X2']
+Y2 = pairfile.columns['Y2']
+
+
+
+
+
+##Now, to plot thumbnails
+
+
+vmin=-1e-2 
+vmax=5.e-2
+
+for i in range(len(Y2)):	
+	pairid = str(i)
+	outfile = 'thumbnails/' + pairid + '.fits'
+	testra = X1[i]                                          #technically using X and Y and not RA/DEC 
+	testdec = Y1[i]
+	ra1 = RAP[i]
+	dec1 = DECP[i]
+	compra = X2[i]
+	compdec = Y2[i]
+	ramin = testra - 80
+	ramax = testra + 80
+
+	decmin = testdec - 80
+	decmax = testdec + 80
+	id1 = str(IDP[i])
+	id2 = str(IDS[i])
+	img = hdu.data
+	img_sub = img[decmin:decmax,ramin:ramax]                        ##Note:python swaps X and Y positions
+ 
+	ax = plt.subplot()
+	ax.imshow(img_sub, vmin = vmin, vmax = vmax,  origin = 'lower',  cmap='gray_r')
+	plt.title('Galaxy pair ' + pairid + ': ' + id1 + ' and ' + id2)
+	plt.show()
+	hdu2 = fits.PrimaryHDU(img_sub)
+	hdu2.writeto(outfile, clobber = True)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
