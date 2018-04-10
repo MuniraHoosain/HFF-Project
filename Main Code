@@ -22,9 +22,14 @@ rad = np.radians
 
 cat = ascii.read('')
 zout = fits.open('')
+dat=ascii.read('.fout')
+uband = ascii.read('153.rf')
+vband = ascii.read('155.rf')
+jband = ascii.read('161.rf')
+
 
 zcat = zout[1].data
-
+fast = dat.columns
 datadir = ''
 imfile = datadir+
 hdu = fits.open(imfile)[0]
@@ -36,18 +41,25 @@ wcs = WCS(hdu.header)
 output = open('catalogue_new.txt','w')
 output2 = open('pairs_new.txt','w')
 output3 = open('','w')
-output4 = open('','w')
 
+
+## Rest frame colours
+
+restU = uband.columns['L153']
+restV = vband.columns['L155']
+restJ = jband.columns['L161']
 
 
 ##reading out redshift data
 
 zspec = zcat['z_spec']
-zphot = zcat['z_phot']
+zphot = zcat['z_peak']
 
 
 RA = cat['ra']
 DEC = cat['dec']
+XCO = cat['x']
+YCO = cat['y']
 
 #assigning the best redshift (note: this didn't work so well last time but hopefully it will work this time)
 
@@ -58,7 +70,10 @@ zbest[mask] = zphot[mask]
 
 ## Comparing spectroscopic and photometric redshifts for the statistics and sample selection
 #these are only the galaxies where we have both spec and phot values
-sample = (zspec >= 0) & (zphot != -1) & (zspec < 1) & (zphot <1) & (zphot != -1) 
+
+
+
+sample = (zspec >= 0) & (zphot != -1) & (zspec < 1) & (zphot <1) & (zphot != -99) 
 
 plt.plot(zspec[sample],zphot[sample],'bo')
 
@@ -66,6 +81,7 @@ plt.plot(zspec[sample],zphot[sample],'bo')
 
 identity = zcat['id']
 zsource = cat['REFspecz'] 
+
 
 
 
@@ -87,7 +103,9 @@ plt.xlabel('spectroscopic redshift')
 plt.ylabel('photometric redshift')
 plt.title('zspec vs zphot for z < 1')
 plt.text(0.2, 0.8, '$\sigma_{NMAD}$ =' + str(scatterprint))
-plt.show() # if this plot is a perfect straight line, then catalogues aren't being read in correctly
+plt.savefig('plots/sigmaNMAD.png')
+plt.show() 
+# if this plot is a perfect straight line, then catalogues aren't being read in correctly
 
 
 ##Calculating Spectroscopic Redshift Bounds
@@ -98,8 +116,8 @@ lowbound = 0.48 ##Lower limit from paper
 upbound = 0.62 ##upper limit from paper
 
 
-clusterlow = 0.52 ## new limits for a better gauss fit - no. bins = 12
-clusterhigh = 0.56
+clusterlow = 0.522 ## new limits for a better gauss fit - no. bins = 12
+clusterhigh = 0.566
 
 #choose which boundaries to use for gauss fit
 
@@ -116,18 +134,22 @@ plt.hist(zspecsample, bins = 12, normed =True)
 ##NOTE: NEED TO CLEAN UP THIS HISTOGRAM AND SORT OUT THE PROBLEMS ASSOCIATED WITH IT - REFIT GAUSS EXC GROUP
 
 
+
 mu,std = norm.fit(zspecsample)
 x = np.linspace(cboundlow,cboundup,len(zspecsample))
 p = norm.pdf(x,mu,std)
 muprint = round(mu,3)
 stdprint = round(std,3)
 plt.plot(x,p)
-plt.title('spectroscopic redshifts 0.48 < x < 0.62 - normal distribution')
+plt.title('spectroscopic redshifts 0.522 < x < 0.566 - normal distribution')
 plt.text(0.49,31, '$\sigma$ =' +str(stdprint)) 
 plt.text(0.49,29, 'mean =' +str(muprint)) 
 plt.xlabel('spectroscopic redshift')
+plt.savefig('plots/spec_z_cluster.png')
 plt.show()
 print('sigma =', stdprint, 'mean', muprint)
+
+
 
 
 
@@ -145,24 +167,15 @@ zminphot = clusterzphot - 3*scatter
 zmaxphot = clusterzphot + 3*scatter
 
 
-## Other parameters
 
-## rest-frame magnitudes calculated by eazy
-restU = zcat['restU']
-restV = zcat['restV']
-restJ = zcat['restJ']
+##SFR Fast
 
-SFR = zcat['SFR']
-##SFR
+SFR_fast = fast['lsfr']
 
-UminV = -2.5*np.log10(restU/restV)
-VminJ = -2.5*np.log10(restV/restJ)
+##Mass fast
 
+masses = fast['lmass']
 
-## mass calculated by eazy
-meazy = zcat['mass']
-masses = meazy
-logmass = np.log10(masses)
 
 ### magnitude in H-band (F160W)
 
@@ -179,36 +192,35 @@ zmag[cat['f_F814W'] == -99] = -99 ## set to -99 if no flux measurement
 
 c = 3*10**5 ## km/s
 
-minmass = 10**9
+minmass = 9
 zmagmin = 26
-mindistance = 15 #kpc
-vmin = 1500 #km/s
+mindistance = 20 #kpc
+vmin = 1000 #km/s
+maxdistance = 5 #kpc
 
 
 #plate scale
 
-z=0.545
-h=0.7  #use H0 = 70km/s/Mpc for everything
-ps = cosmocalc(clusterzphot,H0=70,WM=0.3,WV=0.7)['PS_kpc']
-r = 100/h /ps  #100/h kpc in arcseconds
-print ('search radius in arcsec: %f' %(r))
+
+
+sel = (((zphot > zminphot) & (zphot < zmaxphot) & (zspec == -1)) |( (zspec > zminspec) & (zspec < zmaxspec) )) & (masses > minmass) & (zmag < zmagmin) & (zmag != -99)  & (masses != -99)
+
+selphot = (zphot > zminphot) & (zphot < zmaxphot)  & (masses > minmass) & (zmag < zmagmin) & (zmag != -99)
+sel2 = ( (zspec > zminspec) & (zspec < zmaxspec) ) & (masses > minmass) & (zmag < zmagmin) & (zmag != -99) 
+
+
+bestzsel = ((zbest > zminphot) & (zbest < zmaxphot) &  (masses > minmass) & (zmag < zmagmin) & (zmag != -99)  )| ((zbest > zminspec) & (zbest < zmaxspec) &  (masses > minmass) & (zmag < zmagmin) & (zmag != -99) ) 
 
 
 
-##Selections
-
-
-sel = (((zphot > zminphot) & (zphot < zmaxphot) & (zspec == -1)) |( (zspec > zminspec) & (zspec < zmaxspec) )) & (masses > minmass) & (zmag < zmagmin)
-
-selphot = (zphot > zminphot) & (zphot < zmaxphot)  & (masses > minmass) & (zmag < zmagmin)
-sel2 = ( (zspec > zminspec) & (zspec < zmaxspec) )& (masses > minmass) & (zmag < zmagmin)
-
-
-bestzsel = (zbest > zminphot) & (zbest < zmaxphot)  & (masses > minmass) & (zmag < zmagmin) 
 bestzsample = zbest[bestzsel]
 plt.hist(bestzsample)
 plt.title('best z sample')
+plt.savefig('plots/bestz.png')
 plt.show()
+
+
+
 
 
 sel = bestzsel
@@ -218,9 +230,41 @@ dec_sample = DEC[sel]
 sample_id = identity[sel]
 mass_sample = masses[sel]
 source_spec = zsource[sel]
+SFR_sample = SFR_fast[sel]
+mag_sample = zmag[sel]
+X_sample = XCO[sel]
+Y_sample = YCO[sel]
+
+
+## SFR EAZY
+
+U_sample = restU[sel]
+V_sample = restV[sel]
+J_sample = restJ[sel]
+
+
+UminV = -2.5*np.log(U_sample/V_sample)
+VminJ = -2.5*np.log(V_sample/J_sample)
 
 
 N = len(ra_sample)
+
+
+output.write('ID' + '\t' + 'RA' + '\t' +' DEC' + '\t' + 'MASS' + '\t' + 'ZBEST' + '\t' + 'SPECSOURCE' + '\n')
+
+for f in range(N):
+	ID = str(sample_id[f])
+	RA = "%.5f" %(ra_sample[f])
+	RA = str(RA)
+	DEC = "%.5f" %(dec_sample[f])
+	DEC = str(DEC)
+	MASS = "%.3e" %(mass_sample[f])
+	MASS = str(MASS)
+	ZBEST = "%.4f" %(bestzsample[f])
+	SPECSOURCE = str(source_spec[f]) + '\n'
+	output.write(ID + '\t' + RA + '\t' + DEC + '\t' + MASS + '\t' + ZBEST+ '\t' + SPECSOURCE)
+
+output.close()
 
 
 
@@ -232,12 +276,25 @@ plt.hist(z_sample_phot, color = 'g', label = 'photometric', bins = 17, normed = 
 plt.hist(z_sample_spec, color = 'b', label = 'spectroscopic', bins = 13, normed = True)
 plt.title('redshifts of selected sample')
 plt.xlabel('redshift')
+source_spec = zsource[sel]
 plt.axvline(x = zminspec)
 plt.axvline(x= zmaxspec)
 plt.legend(loc = 2)
+plt.savefig('plots/photvsspecz.png')
 plt.show()
 
-#distance calculation
+
+
+## Some useful functions
+
+
+z=0.545
+h=0.7  #use H0 = 70km/s/Mpc for everything
+ps = cosmocalc(clusterzphot,H0=70,WM=0.3,WV=0.7)['PS_kpc']
+r = 100/h /ps  #100/h kpc in arcseconds
+print ('search radius in arcsec: %f' %(r))
+
+
 
 def distance_calc(dec1,dec2,ra1,ra2):
 	x = sin(dec1)*sin(dec2) + cos(dec1)*cos(dec2)*cos(ra1 - ra2)
@@ -245,6 +302,79 @@ def distance_calc(dec1,dec2,ra1,ra2):
 	distance = theta*3600*ps
 	return distance
 
+def vpec_calc(z1,z2):
+	vpec = np.abs((c * (z1 - z2) ) / (1 + z1) )
+	return vpec
+
+
+
+
+
+##Group trial 
+
+groupmin = 0.556
+groupmax = 0.568
+ramin = 109.367
+ramax = 109.379
+decmin = 37.75
+decmax = 37.76
+
+groupsel1 = (bestzsample > groupmin) & (bestzsample < groupmax) & (ra_sample > ramin) & (ra_sample < ramax) & (dec_sample > decmin) & (dec_sample < decmax)
+groupz = bestzsample[groupsel1]
+groupmean = np.mean(groupz)
+groupsig = np.std(groupz)
+
+ra_group = ra_sample[groupsel1]
+dec_group = dec_sample[groupsel1]
+
+groupID = sample_id[groupsel1]
+mag_group = mag_sample[groupsel1]
+groupsource = source_spec[groupsel1]
+
+
+
+
+for y in range(len(ra_group)):
+	IDG = str(groupID[y])
+	RAG = "%.5f" %(ra_group[y])
+	RAG = str(RAG)
+	DECG = "%.5f" %(dec_group[y])
+	DECG = str(DECG) 
+	ZSOURCE = str(groupsource[y])
+	ZG = "%.4f" %(groupz[y])
+	ZG = str(ZG) + '\n'
+	output3.write(IDG + '\t' + RAG + '\t' + DECG + '\t' + ZSOURCE + '\t' + ZG )
+
+
+
+
+
+
+### check distances
+
+groupdistances  = []
+group1 = []
+group2 = []
+vpecgroup = []
+
+for m in range(len(ra_group)):
+	ra1 = ra_group[m]
+	dec1 = dec_group[m]
+	z1 = groupz[m]
+	for n in range(len(ra_group)):
+		if (n > m):
+			ra2 = ra_group[n]
+			dec2 = dec_group[n]
+			z2 = groupz[n]
+			groupdistance =  distance_calc(dec1,dec2,ra1,ra2)
+			vpecg = vpec_calc(z1,z2)
+			if ((groupdistance < mindistance) & (n != m) )| (vpecg < vmin):
+				groupdistances.append(groupdistance)
+				group1.append(m)
+				group2.append(n)
+				vpecgroup.append(vpecg)
+
+#distance calculation
 
 pair1 = []
 pair2 = []
@@ -254,46 +384,93 @@ distancelist = []
 
 for i in range(N):
 	ra1 = ra_sample[i]
+
 	dec1 = dec_sample[i]
 	for j in range(N):
-		j > i
-		ra2 = ra_sample[j]
-		dec2 = dec_sample[j]
-		distance_found = distance_calc(dec1,dec2,ra1,ra2)
-		if (distance_found < mindistance) & (i != j):
-			pair1.append(i)
-			pair2.append(j)
-			distancelist.append(distance_found)
+		if (j > i):
+			ra2 = ra_sample[j]
+			dec2 = dec_sample[j]
+			distance_found = distance_calc(dec1,dec2,ra1,ra2)
+			if (distance_found < mindistance) & (distance_found > maxdistance) & (i != j) :
+				pair1.append(i)
+				pair2.append(j)
+				distancelist.append(distance_found)
+
  
-#pairsize = len(distancelist)/3
+
 distancelist = np.array(distancelist)
-#distancepairs = np.split(distancelist,pairsize)
-#distancepairs = np.array(distancepairs)
 pair1 = np.array(pair1)
 pair2 = np.array(pair2)
 
+
 ##VELOCITY CALCULATIONS
 
-def vpec_calc(z1,z2):
-	vpec = np.abs((c * (z1 - z2) ) / (1 + z1) )
-	return vpec
 
 
 pairvelocities = []
 vpecindices = []
 M = len(pair1)
+distance_update = []
 
+
+ebeling = np.where((source_spec[pair1] == 'ebeling') & (source_spec[pair2] == 'ebeling') )
+grizli = np.where((source_spec[pair1] == 'grizli') & (source_spec[pair2] == 'grizli') )
+speccomb = np.where(((source_spec[pair1] == 'grizli') & (source_spec[pair2] == 'ebeling')) | ((source_spec[pair1] == 'ebeling') & (source_spec[pair2] == 'grizli') )  )
+photo = np.where((source_spec[pair1] == 'none') & (source_spec[pair2] == 'none') )
+photocomb = np.where(((source_spec[pair1] == 'none') & ((source_spec[pair2] == 'ebeling') | (source_spec[pair2] == 'grizli')) ) | ((source_spec[pair2] == 'none') & ((source_spec[pair1] == 'ebeling') | (source_spec[pair1] == 'grizli')) ))
 
 for k in range(M):
 	z1 = bestzsample[pair1[k]]
 	z2 = bestzsample[pair2[k]]
 	vpec = vpec_calc(z1,z2)
-	if vpec < vmin:
-		vpecindices.append(k)
-		pairvelocities.append(vpec)
+	
+	if k in ebeling[0]:
+		vmin = 500	
+		if vpec < vmin:
+			vpecindices.append(k)
+			pairvelocities.append(vpec)
+			distancev = distancelist[k]
+			distance_update.append(distancev)
+	
+	elif k in grizli[0]:
+		vmin = 1000	
+		if vpec < vmin:
+			vpecindices.append(k)
+			pairvelocities.append(vpec)
+			distancev = distancelist[k]
+			distance_update.append(distancev)
+	elif k in speccomb[0]:
+		vmin = 1500	
+		if vpec < vmin:
+			vpecindices.append(k)
+			pairvelocities.append(vpec)
+			distancev = distancelist[k]
+			distance_update.append(distancev)
+	elif k in photo[0]:
+		vmin = scatter*c	
+		if vpec < vmin:
+			vpecindices.append(k)
+			pairvelocities.append(vpec)
+			distancev = distancelist[k]
+			distance_update.append(distancev)
 
+	elif k in photocomb[0]:
+		vmin = 2000	
+		if vpec < vmin:
+			vpecindices.append(k)
+			pairvelocities.append(vpec)
+			distancev = distancelist[k]
+			distance_update.append(distancev)
+
+
+distance_update = np.array(distance_update)
 vpecindices = np.array(vpecindices)
-		
+pairvelocities = np.array(pairvelocities)		
+
+
+
+
+
 ## MASS SELECTIONS
 
 vdpair1 = pair1[vpecindices]
@@ -303,60 +480,25 @@ pair_masses_1 = mass_selection[vdpair1]
 pair_masses_2 = mass_selection[vdpair2]
 
 
-mass_ratio = pair_masses_1/pair_masses_2
+mass_ratio = 10**(pair_masses_1)/10**(pair_masses_2)
 
-invert = pair_masses_2/pair_masses_1
+invert = 10**(pair_masses_2)/10**(pair_masses_1)
 massratio = np.copy(mass_ratio)
 mass_mask = (mass_ratio > 1.)
 
 massratio[mass_mask] = invert[mass_mask]
-
+plt.title('Mass Ratios for paired galaxies')
 plt.hist(massratio)
-plt.show()
-
-
-## SFR
-
-UminV_sample = UminV[sel]
-VminJ_sample = VminJ[sel]
-
-y1 = 1.3
-x1 = (y1 - 0.59)/0.88
-x2  = 1.6
-y2 = 0.88*x2 + 0.59
-
-xval = np.array([x1,x2])
-yval = np.array([y1,y2])
-
-sfrx = np.linspace(-1.1,3,100)
-sfry = 0.88*sfrx + 0.59
-
-
-quies = ((UminV_sample > 0.89*VminJ_sample + 0.59) & (VminJ_sample > x1) & (VminJ_sample < 1.6)) | ((UminV_sample > 1.3) & (VminJ_sample < x1))
-
-VminJp1 = VminJ_sample[vdpair1]
-VminJp2 = VminJ_sample[vdpair2]
-
-UminVp1 = UminV_sample[vdpair1]
-UminVp2 = UminV_sample[vdpair2]
-
-
-VminJQ = VminJ_sample[quies]
-UminVQ = UminV_sample[quies] 
-#sfr_sample = SFR[sel]
-
-plt.plot(sfrx,sfry)
-plt.scatter(VminJ_sample,UminV_sample, c ='b',alpha = 0.5, label = 'star forming')
-plt.scatter(VminJQ, UminVQ, c ='r', alpha = 0.5, label = 'quiescent')
-plt.scatter(VminJp1,UminVp1, c = 'k')
-plt.scatter(VminJp2,UminVp2, c = 'k')
+plt.savefig('plots/massratio.png')
 plt.show()
 
 
 
 
-## Plotting the main figure
 
+
+
+##Samples
 
 ra_m = ra_sample
 dec_m = dec_sample
@@ -364,20 +506,178 @@ ra_primary = ra_sample[vdpair1]
 ra_secondary = ra_sample[vdpair2]
 dec_primary = dec_sample[vdpair1]
 dec_secondary = dec_sample[vdpair2]
+id1 = sample_id[vdpair1]
+id2 = sample_id[vdpair2]
+mass_sample1 = mass_sample[vdpair1]
+mass_sample2 = mass_sample[vdpair2]
+source1 = source_spec[vdpair1]
+source2 = source_spec[vdpair2]
+redshift1 = bestzsample[vdpair1]
+redshift2 = bestzsample[vdpair2]
+SFR1 = SFR_sample[vdpair1]
+SFR2 = SFR_sample[vdpair2]
+XP1 = X_sample[vdpair1]
+YP1 = Y_sample[vdpair1]
+XP2 = X_sample[vdpair2]
+YP2 = Y_sample[vdpair2]
+
+
+sfrmassplot = [SFR_sample != -99]
+pairsfr1 = [SFR1 != -99 ]
+pairsfr2 = [SFR2 != -99]
+plt.plot(mass_sample[sfrmassplot],SFR_sample[sfrmassplot],'.')
+plt.plot(mass_sample1[pairsfr1],SFR1[pairsfr1], 'ro', label = 'pairs')
+plt.plot(mass_sample2[pairsfr2],SFR2[pairsfr2], 'ro', label ='pairs' )
+
+alpha = 0.70 - 0.13*z
+beta = 0.38 + 1.14*z - 0.19*z**2
+ 
+SFR_rel = alpha * (mass_sample[sfrmassplot] - 10.5) + beta
+plt.plot(mass_sample[sfrmassplot],SFR_rel)
+plt.xlabel('log mass')
+plt.ylabel('log FAST SFR')
+plt.title('Log mass vs Log Star Formation Rate')
+plt.savefig('plots/sfrmassFAST.png')
+plt.show()
+
+
+
+
+
+##EAZY SFR
+
+
+
+y1 = 1.3
+x1 = (y1 - 0.59)/0.88
+x2  = 1.6
+y2 = 0.88*x2 + 0.59
+
+
+
+UminV = -2.5*np.log10(U_sample/V_sample)
+VminJ = -2.5*np.log10(V_sample/J_sample)
+
+#quies = ((UminV > 0.88*VminJ + 0.59) & (VminJ > x1) & (VminJ < 1.6)) | ((UminV > 1.3) & (VminJ < x1))
+quies = ((UminV > 0.88*VminJ+0.59) & (VminJ > x1) & (VminJ < 1.6)) | ((UminV > 1.3) & (VminJ < x1))
+
+
+#starf = ((UminV < 0.89*VminJ + 0.59) & (VminJ < x1) & (VminJ > 1.6)) | ((UminV < 1.3) & (VminJ > x1))
+
+
+UminVq = UminV[quies]
+VminJq = VminJ[quies]
+
+##overplot selection box
+plt.plot([0,x1], [y1, y1], 'k-')
+plt.plot([x1, x2], [y1, y2], 'k-')
+plt.plot([x2, x2], [y2, 2.5], 'k-')
+
+#UminVsf = UminV[starf]
+#VminJsf = VminJ[starf]
+
+UVp1 = UminV[vdpair1]
+VJp1 = VminJ[vdpair1]
+
+UVp2 = UminV[vdpair2]
+VJp2 = VminJ[vdpair2]
+
+#plt.axis([-2,2.1, 0.3,2.5])
+plt.ylabel("U-V")
+plt.xlabel("V-J")
+plt.scatter(VminJ,UminV, alpha = 0.5, c = 'b', label = 'star forming')
+plt.scatter(VminJq,UminVq,alpha = 0.5, c = 'r', label = 'quiescent')
+plt.scatter(VJp1,UVp1, c = 'g', label = 'pairs')
+plt.scatter(VJp2,UVp2,c = 'g')
+plt.savefig('plots/UV_VJ_starformation.png')
+plt.show()
+
+
+
+
+
+
+
+
+
+output2.write('IDP' + '\t' + 'SOURCEP' + '\t' + 'RAP' + '\t' + 'DECP' + '\t' + 'X1' + '\t' + 'Y1' + '\t' + 'ZB1' + '\t' + 'MASSP' + '\t' + 'IDS' + '\t' + 'SOURCES' + '\t' + 'RAS' + '\t' + 'DECS' + '\t' + 'X2' + '\t' + 'Y2' +'\t' + 'ZB2' + '\t' + 'MASSS' + '\t' + 'VPEC' + '\t' + 'MASSR' + '\t' + 'DISTANCE' + '\n')
+for g in range(len(vdpair1)):
+	IDP = str(id1[g])
+	IDS = str(id2[g])
+	SOURCEP = str(source1[g])
+	SOURCES = str(source2[g])
+	RAP = "%.5f" %(ra_primary[g])
+	RAP = str(RAP)
+	RAS = "%.5f" %(ra_secondary[g])
+	RAS = str(RAS)
+	DECP = "%.5f" %(dec_primary[g])
+	DECP = str(DECP)
+	DECS = "%.5f" %(dec_secondary[g])
+	DECS = str(DEC) 
+	MASSP = "%.3f" %(mass_sample1[g])
+	MASSP = str(MASSP)
+	MASSS = "%.3f" %(mass_sample2[g])
+	MASSS = str(MASSS) 
+	ZBESTP = "%.3f" % (redshift1[g])
+	ZB1 = str(ZBESTP)
+
+	X1 = "%.5f" %(XP1[g])
+	X1 = str(X1)
+	X2 = "%.5f" %(XP2[g])
+	X2 = str(X2)
+	Y1 = "%.5f" %(YP1[g])
+	Y1 = str(Y1)
+	Y2 = "%.5f" %(YP2[g])
+	Y2 = str(Y2)
+	ZBESTS = "%.3f" % (redshift2[g])
+	ZB2 = str(ZBESTS)
+	VPEC = "%.4f" %(pairvelocities[g])
+	VPEC = str(VPEC)
+ 	MASSR = "%.3f" %(massratio[g])
+	MASSR = str(MASSR)  
+	DISTANCE = "%.3f" % (distance_update[g])
+	DISTANCE = str(DISTANCE) + '\n' 
+	output2.write(IDP + '\t' + SOURCEP + '\t' + RAP + '\t' + DECP + '\t' +X1 + '\t' + Y1 + '\t' + ZB1 + '\t' + MASSP + '\t' + IDS + '\t' + SOURCES + '\t' + RAS + '\t' + DECS +'\t' + X2 + '\t' + Y2 +  '\t' +  ZB2 + '\t' + MASSS + '\t' + VPEC + '\t' + MASSR + '\t' + DISTANCE )
+
+output2.close()
+
+
+
 
 
 plt.figure(1)
 ax = plt.subplot(1,1,1, projection=wcs)
 ax.imshow(hdu.data, vmin=-1e-2, vmax=5.e-2, origin='lower',cmap='gray_r')
-ax.scatter(ra_m,dec_m, marker='+',transform=ax.get_transform('fk5'), c='g', label = 'cluster member')
-ax.scatter(ra_primary,dec_primary, s = 30, marker = 'o', transform = ax.get_transform('fk5'), c = 'r')
-ax.scatter(ra_secondary,dec_secondary,s=30, marker = 'o', transform = ax.get_transform('fk5'),c = 'b')
 
+ax.scatter(ra_primary,dec_primary, s = 30, marker = 'o', transform = ax.get_transform('fk5'), alpha = 0.7, c = 'r', label = 'pair')
+ax.scatter(ra_secondary,dec_secondary,s=30, marker = 'o', transform = ax.get_transform('fk5'), alpha = 0.7, c = 'b', label = 'pair2')
+ax.scatter(ra_group,dec_group, s = 30, marker = 'o', transform = ax.get_transform('fk5'), c = 'g', alpha = 0.7, label = 'group')
+#ax.scatter(cat['ra'],cat['dec'], s = 30, marker = '+', transform = ax.get_transform('fk5'), c = 'cyan', alpha = 0.7, label = 'object')
+ax.scatter(ra_m,dec_m, marker='+',transform=ax.get_transform('fk5'), c='g', label = 'cluster member')
+ax.legend()
+plt.savefig('plots/clusterpairs.png')
 plt.show()
 
 
-#########################################################################################################
-############################-----everything above this line works well-----##############################
-#########################################################################################################
+galaxycount1 = np.sort(vdpair1)
+galaxycount2 = np.sort(vdpair2)
+print('check for any duplicates',galaxycount1, galaxycount2)
+#unique = np.where[galaxycount1 != galaxycount2]
+Ngalaxies = len(galaxycount1) + len(galaxycount2) - 1 
+pairfraction = (float(Ngalaxies)/float(len(ra_m)))*100
+
+print('pair fraction = ', pairfraction, '%')
+
+
+
+
+
+output3.close()
+
+
+
+
+
+
 
 
